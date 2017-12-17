@@ -1,0 +1,29 @@
+{
+    "help": {
+        "description": "Displays the available commands",
+        "command": "showHelp"
+    },
+    "stream": {
+        "description": "Show live feed",
+        "submenu" : {
+            "start": {
+                "description": "Starts streaming live video. (Starts or Joins Conference)",
+                "command": "startStream"
+            },
+            "stop": {
+                "description": "Stops streaming live video. (Leaves or Terminates Conference)",
+                "command": "stopStream"
+            },
+            "end": true
+        },
+        "command": "stream"
+    },
+    "status": {
+        "description": "Displays the status of the device",
+        "command": "status"
+    },
+    "version": {
+        "description": "Displays the device's software version",
+        "command": "version"
+    }
+}
