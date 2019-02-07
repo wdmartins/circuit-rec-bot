@@ -8,13 +8,18 @@
     "dev": "electron . --debug"
   },
   "dependencies": {
+    "@google-cloud/speech": "^0.11.0",
     "bunyan": "^1.5.1",
     "chokidar": "^1.7.0",
-    "circuit-sdk": "^1.2.1900",
-    "electron": "^1.8.1",
+    "circuit-sdk": "^1.2.2400",
     "commander": "^2.11.0",
-    "file-api": "^0.10.4"
+    "electron": "^1.8.1",
+    "file-api": "^0.10.4",
+    "fluent-ffmpeg": "^2.1.2"
   },
   "author": "Walter Martins",
-  "license": "Apache 2.0"
+  "license": "Apache 2.0",
+  "devDependencies": {
+    "electron-rebuild": "^1.6.0"
+  }
 }

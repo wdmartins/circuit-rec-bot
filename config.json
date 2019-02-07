@@ -1,14 +1,17 @@
 {
     "bot": {
-        "client_id": "<your client id>",
-        "client_secret": "<your client secret>",
+        "client_id": "a04928cc33104fe3914710987cff7273",
+        "client_secret": "b607e25ccf914982a34a4bc2f9305571",
         "domain": "circuitsandbox.net",
         "nick_name": "Primo",
-        "first_name": "Primo",
-        "last_name": "Primo",
+        "first_name": "Circuit",
+        "last_name": "Recorder",
         "job_title": "Audio Recorder",
         "company": "Unify"
     },
-    "botOwnerEmail": "<your email address>",
-    "convId": "<conversationId bot will listen to>"
+    "botOwnerEmail": "walter.martins@unify.com",
+    "convId": "7fef6032-f70e-44bf-806e-5f8a2a487b03",
+    "ogg_file": "/tmp/circuit/test.ogg",
+    "raw_file": "/tmp/circuit/test.raw",
+    "text_file": "/tmp/circuit/test.txt"
 }

@@ -25,5 +25,13 @@
     "version": {
         "description": "Displays the device's software version",
         "command": "version"
+    },
+    "dial": {
+        "description": "Uses Circuit SDK to dial a phone number. Use dial [phoneNumber]",
+        "command": "dial"
+    },
+    "shutdown": {
+        "description": "Logs out the bot from circuit and terminates the process",
+        "command": "shutdown"
     }
 }

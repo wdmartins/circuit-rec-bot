@@ -4,19 +4,26 @@
 const electron = require('electron');
 const app = electron.app;
 const BrowserWindow = electron.BrowserWindow;
+const { ipcMain } = require('electron');
 const path = require('path');
 const url = require('url');
 
 // Load configuration
-var config = require('./config.json');
-
-var packjson = require('./package.json');
+const config = require('./config.json');
+const packjson = require('./package.json');
 
 // Logger
-var bunyan = require('bunyan');
+const bunyan = require('bunyan');
 
 // Command Processing
-var Commander = require('./commandProcess.js');
+const Commander = require('./commandProcess.js');
+const ffmpeg = require('fluent-ffmpeg');  
+const mime = require('mime');  
+
+// Transciber as a child process
+const fork = require('child_process').fork;
+const program = path.resolve('transcriber.js');
+const child = fork(program);
 
 let debug = /--debug/.test(process.argv[2]);
 let win;
@@ -96,7 +103,8 @@ Circuit.setLogger(sdkLogger);
 var client = new Circuit.Client({
     client_id: config.bot.client_id,
     client_secret: config.bot.client_secret,
-    domain: config.domain
+    domain: config.domain,
+    scope: 'ALL'
 });
 
 var Robot = function () {
@@ -120,16 +128,21 @@ var Robot = function () {
     //* logonBot
     //*********************************************************************
     this.logonBot = function () {
-        logger.info(`[ROBOT]: Create robot instance with id: ${config.bot.client_id}`);
-        return new Promise(function (resolve, reject) {
+        return new Promise(function(resolve, reject) {
+            var retry;
             self.addEventListeners(client);
-            client.logon().then(logonUser => {
-                logger.info(`[ROBOT]: Client created and logged as ${logonUser.userId}`);
-                user.userId = logonUser.userId;
-                setTimeout(resolve, 5000);
-            }).catch(error => {
-                logger.error(`[ROBOT]: Error logging Bot. Error: ${error}`);
-            });
+            var logon = function () {
+                client.logon().then(logonUser => {
+                    logger.info(`[ROBOT]: Client created and logged as ${logonUser.userId}`);
+                    user = logonUser;
+                    clearInterval(retry);
+                    setTimeout(resolve, 5000);
+                }).catch(error => {
+                    logger.error(`[ROBOT]: Error logging Bot. Error: ${error}`);
+                });
+            }
+            logger.info(`[ROBOT]: Create robot instance with id: ${config.bot.client_id}`);
+            retry = setInterval(logon, 2000);
         });
     };
 
@@ -152,7 +165,10 @@ var Robot = function () {
     //*********************************************************************
     this.addEventListeners = function (client) {
         logger.info(`[ROBOT]: addEventListeners`);
-        Circuit.supportedEvents.forEach(e => client.addEventListener(e, self.processEvent));
+        Circuit.supportedEvents.forEach(function(e) {
+            logger.info(`[ROBOT] add Event listener for ${e}`);
+            client.addEventListener(e, self.processEvent)
+        });
     };
 
     //*********************************************************************
@@ -309,9 +325,13 @@ var Robot = function () {
     //*********************************************************************
     this.processCallStatusEvent = function (evt) {
         logger.info(`[ROBOT]: Received callStatus event with call state ${evt.call.state}`);
-        if (evt.call.state === 'Started') {
-            self.stream(evt.call.convId, `start`);
+        if (evt.call.reason === `sdpConnected`) {
+            logger.info(`[ROBOT] SDP Connected. Start Recording`);
+            this.startRecording(call);
         }
+        // if (evt.call.state === 'Started') {
+        //     self.stream(evt.call.convId, `start`);
+        // }
     };
 
     //*********************************************************************
@@ -334,6 +354,7 @@ var Robot = function () {
                 switch (reply) {
                     case 'status':
                         self.reportStatus(convId, itemId);
+                        transcode(config.ogg_file, config.raw_file);
                         break;
                     case 'version':
                         self.reportVersion(convId, itemId);
@@ -346,6 +367,12 @@ var Robot = function () {
                         break;
                     case 'stopStream':
                         self.stream(convId, `stop`);
+                        break;
+                    case 'dial':
+                        self.dial(convId, itemId, params);
+                        break;
+                    case 'shutdown':
+                        self.shutdown();
                         break;
                     default:
                         logger.info(`[ROBOT] I do not understand [${withoutName}]`);
@@ -387,21 +414,79 @@ var Robot = function () {
             .then(item => client.addTextItem(convId || conversation.convId, item)));
     };
 
-    this.stream = async function (convId, parm) {
-        logger.info(`[ROBOT] Sending stream message to renderer`);
-        let conv = await client.getConversationById(convId);
-        win.webContents.send("stream", convId, conv.rtcSessionId, parm);
+    //*********************************************************************
+    //* dial phone number
+    //*********************************************************************
+    this.dial = function (convId, itemId, params) {
+        if (!params || !params.length) {
+            logger.error(`[ROBOT] No number to dial`);
+            self.buildConversationItem(itemId, `ERROR`, "Unable to dial. Number missing")
+            .then(item => client.addTextItem(convId || conversation.convId, item));
+        } else {
+            logger.info(`[ROBOT] Sending dial message to renderer`);
+            win.webContents.send("dial", params && params.join());
+            self.buildConversationItem(itemId, `Dialing`, `Dialing ${params.join()}`)
+            .then(item => client.addTextItem(convId || conversation.convId, item));
+        }
     }
 
+    this.startRecording = async function(call) {
+        logger.info(`[ROBOT] Sending startRecording to renderer`);
+        win.webContents.send("startRecording", call);
+    }
+
+    this.shutdown = function (reason) {
+        logger.warn(`[ROBOT] Shutting down. Reason: ${reason}`);
+        client.logout();
+        throw new Error('Terminated by user');
+    }
 }
 
+ipcMain.on("recordingReady", function(sender, params) {
+    logger.info(`[ROBOT] Recording is ready for transcoding`);
+    // Transcode file for google speech transcription
+    transcode(config.ogg_file, config.raw_file).then(function() {
+        logger.info(`[ROBOT] Transcoding complete`);
+    }).catch(e => logger.error(e)); 
+});
+
+// /opt/ffmpeg/ffmpeg -acodec opus -i test.raw -f s16le -acodec pcm_s16le -ar 16000 output.raw
+function transcode(fileIn, fileOut) {
+    return new Promise(function(resolve, reject) {
+        if (!fileIn || !fileOut) {
+            throw new Error('You must specify a path for both input and output files.');
+        }
+        if (!fs.existsSync(fileIn)) {
+            throw new Error(`Input file must exist. Input file: ${fileIn}`);
+        }
+        if (mime.lookup(fileIn).indexOf('audio') > -1) {
+            try {
+                ffmpeg()
+                    .input(fileIn)
+                    .outputOptions([
+                        '-f s16le',
+                        '-acodec pcm_s16le',
+                        '-vn',
+                        '-ac 1',
+                        '-ar 16k',
+                        '-map_metadata -1'
+                    ])
+                    .save(fileOut)
+                    .on('end', () => resolve(fileOut));
+            } catch (e) {
+                reject(e);
+            }
+        } else {
+            throw new Error('File must have audio mime.');
+        }   
+    });
+}
 //*********************************************************************
 //* main
 //*********************************************************************
 var robot = new Robot();
 robot.initBot()
     .then(robot.logonBot)
-    .then(robot.updateUserData)
     .then(robot.sayHi)
     .catch(robot.terminate);
 
